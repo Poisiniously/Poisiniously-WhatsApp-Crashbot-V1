@@ -27,4 +27,9 @@
   "usage": "sticker",
   "description": "Erstellt einen Sticker aus einem Bild (anhängen oder antworten)."
   }
+  "profile": {
+    "usage": "profile @Nutzer",
+    "description": "Zeigt Profilbild, Status und Admin-Rechte eines Nutzers an (oder von dir selbst, wenn niemand markiert ist)."
+  }
+}
 
