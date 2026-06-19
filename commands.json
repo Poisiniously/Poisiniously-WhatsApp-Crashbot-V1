@@ -29,7 +29,7 @@
   }
   "profile": {
     "usage": "profile @Nutzer",
-    "description": "Zeigt Profilbild, Status und Admin-Rechte eines Nutzers an (oder von dir selbst, wenn niemand markiert ist)."
+    "description": "Zeigt Informationen über markierte Personen."
   }
 }
 
