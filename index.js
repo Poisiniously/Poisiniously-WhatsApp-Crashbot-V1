@@ -361,54 +361,113 @@ async function connectToWhatsApp() {
                 await sock.sendMessage(from, { text: '❌ Fehler beim Laden der Profil-Informationen.' });
             }
         }
-        // Experimenteller Befehl: Latenz-Messung für Geräte-Tendenzen
+        // Upgegradeter Befehl: Multi-Latenz-Messung (Durchschnitt aus 5 Pings)
         if (command === 'checkdevice') {
             const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid;
             const targetJid = (mentioned && mentioned.length > 0) ? mentioned[0] : msg.key.participant || msg.key.remoteJid;
 
-            // 1. Eine unsichtbare/leere Nachricht an das Ziel senden
-            const sentMsg = await sock.sendMessage(targetJid, { text: 'Checking connection...' });
-            const sendTime = Date.now(); // Zeitstempel beim Absenden
+            try {
+                // 1. Basis-Nachricht senden
+                const baseMsg = await sock.sendMessage(targetJid, { text: '🔄 Analysiere Verbindung...' });
+                
+                const pings = 5; // Anzahl der Test-Reaktionen
+                const emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+                const sendTimes = {};
+                const delays = [];
 
-            // Wir erstellen ein temporäres Event, um auf die Rückmeldung des Servers für genau DIESE Nachricht zu warten
-            const receiptListener = async (receipts) => {
-                for (const receipt of receipts) {
-                    // Wir prüfen, ob die Quittung von unserem Ziel kommt und zu unserer Nachricht gehört
-                    if (receipt.jid === targetJid && receipt.ack === 2) { // ack 2 bedeutet: Auf dem Gerät zugestellt
-                        const receiveTime = Date.now();
-                        const delay = receiveTime - sendTime; // Differenz in Millisekunden
+                // Statussignal für den aktuellen Chat senden
+                await sock.sendMessage(from, { text: `⏳ Starte Multi-Ping-Analyse (${pings} Testsignale) für @${targetJid.split('@')[0]}...`, mentions: [targetJid] });
 
-                        // Listener sofort wieder entfernen, damit er nicht weiterläuft
-                        sock.ev.off('messages.update', receiptListener);
-
-                        // Auswertung der Latenz
-                        let verdict = "📱 Wahrscheinlich Smartphone (Direkte Antwort)";
-                        if (delay > 400) {
-                            verdict = "💻 Tendenz zu WhatsApp Web / PC oder schlechtem Empfang";
+                // Event-Listener für die Quittungen (Receipts) definieren
+                const multiReceiptListener = async (receipts) => {
+                    for (const receipt of receipts) {
+                        // Wir suchen nach Updates für Nachrichten, deren ID wir in sendTimes registriert haben
+                        if (receipt.jid === targetJid && receipt.ack === 2) {
+                            // Überprüfen, ob wir die IDs der Reaktionen matchen können
+                            // Hinweis: Baileys liefert oft die IDs der aktualisierten Nachrichten im receipt-Objekt
+                            if (receipt.ids) {
+                                for (const id of receipt.ids) {
+                                    if (sendTimes[id] && !sendTimes[id].received) {
+                                        sendTimes[id].received = Date.now();
+                                        const singleDelay = sendTimes[id].received - sendTimes[id].sent;
+                                        delays.push(singleDelay);
+                                        
+                                        // Wenn wir alle Pings zurückhaben, werten wir aus
+                                        if (delays.length === pings) {
+                                            sock.ev.off('messages.update', multiReceiptListener);
+                                            finalizeAnalysis(delays, from, targetJid, sock);
+                                        }
+                                    }
+                                }
+                            }
                         }
-
-                        // Ergebnis in den ursprünglichen Chat zurücksenden
-                        await sock.sendMessage(from, { 
-                            text: `⏱️ *Latenz-Analyse für* @${targetJid.split('@')[0]}:\n\n` +
-                                   `• *Antwortzeit:* \`${delay} ms\`\n` +
-                                   `• *Auswertung:* ${verdict}`,
-                            mentions: [targetJid]
-                        });
-                        return;
                     }
+                };
+
+                // Listener aktivieren
+                sock.ev.on('messages.update', multiReceiptListener);
+
+                // 2. Reaktionen mit minimaler Verzögerung nacheinander senden
+                for (let i = 0; i < pings; i++) {
+                    const reactMsg = await sock.sendMessage(targetJid, {
+                        react: { text: emojis[i], key: baseMsg.key }
+                    });
+                    
+                    // Wir speichern die Nachricht-ID der Reaktion und die exakte Absendezeit
+                    sendTimes[reactMsg.key.id] = {
+                        sent: Date.now(),
+                        received: null
+                    };
+
+                    // Kurze Pause (50ms) zwischen den Pings, um das Protokoll nicht zu überlasten
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
-            };
 
-            // Event-Listener aktivieren
-            sock.ev.on('messages.update', receiptListener);
+                // Sicherheits-Timeout: Falls das Ziel offline ist, den Listener nach 10 Sekunden killen
+                setTimeout(() => {
+                    if (delays.length < pings) {
+                        sock.ev.off('messages.update', multiReceiptListener);
+                        if (delays.length > 0) {
+                            // Auswertung mit den Werten, die wir bis dahin bekommen haben
+                            finalizeAnalysis(delays, from, targetJid, sock, true);
+                        } else {
+                            sock.sendMessage(from, { text: '❌ Analyse abgebrochen. Das Zielgerät hat nicht rechtzeitig geantwortet (wahrscheinlich offline oder im Deep Sleep).' });
+                        }
+                    }
+                }, 10000);
 
-            // 2. Sofort Reaktionen hinterhersenden, um die Leitung zu "fordern"
-            const emojis = ['⏳', '⚡', '🤖'];
-            for (const emoji of emojis) {
-                await sock.sendMessage(targetJid, {
-                    react: { text: emoji, key: sentMsg.key }
-                });
+            } catch (error) {
+                console.error("Fehler beim Multi-Ping:", error);
             }
+        }
+
+        // Hilfsfunktion zur Berechnung und Ausgabe (kannst du außerhalb oder innerhalb der Befehlsschleife platzieren)
+        async function finalizeAnalysis(delays, from, targetJid, sock, incomplete = false) {
+            // Durchschnitt (Mittelwert) berechnen
+            const sum = delays.reduce((a, b) => a + b, 0);
+            const average = Math.round(sum / delays.length);
+
+            // Höchsten und niedrigsten Wert ermitteln (Spanne)
+            const min = Math.min(...delays);
+            const max = Math.max(...delays);
+            const variance = max - min; // Einfache Varianz-Anzeige
+
+            let verdict = "📱 Hohe Wahrscheinlichkeit für direktes Smartphone";
+            if (average > 450 || variance > 300) {
+                verdict = "💻 Erhöhte Tendenz zu WhatsApp Web / PC (oder instabilem Mobilfunk)";
+            }
+
+            const statusText = incomplete ? "⚠️ *Analyse unvollständig (Timeout), Teil-Auswertung:*\n\n" : "📊 *ERGEBNIS DER MULTI-LATENZ-ANALYSE:*\n\n";
+
+            await sock.sendMessage(from, {
+                text: statusText +
+                       `• *Ziel:* @${targetJid.split('@')[0]}\n` +
+                       `• *Erfolgreiche Pings:* \`${delays.length}\`\n` +
+                       `• *Durchschnitts-Latenz:* \`${average} ms\`\n` +
+                       `• *Schwankung (Min/Max):* \`${min} ms\` bis \`${max} ms\`\n\n` +
+                       `• *Einschätzung:* ${verdict}`,
+                mentions: [targetJid]
+            });
         }
     });
 }
