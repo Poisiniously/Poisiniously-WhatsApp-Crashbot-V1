@@ -35,5 +35,9 @@
     "usage": "menu",
     "description": "*Experimentell*:Versucht das Gerät der getaggten Person zu identifizieren."
   },
+  "device": {
+    "usage": "menu",
+    "description": "*Experimentell*:Versucht das Gerät der getaggten Person zu identifizieren."
+  }
 }
 
