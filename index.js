@@ -385,6 +385,68 @@ async function finalizeAnalysis(delays, from, targetJid, sock, incomplete = fals
                 await sock.sendMessage(from, { text: '❌ Fehler beim Auslesen der Metadaten.' });
             }
         }
+        // 11. Ban-Checker (Prüft, ob eine Nummer auf WhatsApp existiert/gebannt wurde)
+        if (command === 'bancheck' || command === 'checkban') {
+            let targetNumber = args[0];
+
+            // Wenn keine Nummer mitgegeben wurde, aber auf eine Nachricht geantwortet wurde
+            const quotedJid = msg.message.extendedTextMessage?.contextInfo?.participant;
+            if (!targetNumber && quotedJid) {
+                targetNumber = quotedJid.split('@')[0];
+            }
+
+            if (!targetNumber) {
+                await sock.sendMessage(from, { 
+                    text: `⚠️ Bitte gib eine Nummer an oder antworte auf die Nachricht von jemandem!\nBeispiel: *${PREFIX}bancheck 4917612345678*` 
+                });
+                return;
+            }
+
+            // Bereinige die Nummer (entferne +, Leerzeichen, Striche)
+            let cleanNumber = targetNumber.replace(/[^0-9]/g, '');
+
+            // Falls jemand die Nummer mit "00" statt "+" eingibt
+            if (cleanNumber.startsWith('00')) {
+                cleanNumber = cleanNumber.substring(2);
+            }
+
+            await sock.sendMessage(from, { text: `🔍 Prüfe Server-Status für Nummer: \`+${cleanNumber}\`...` });
+
+            try {
+                // Baileys eigene Funktion, um die Existenz auf den WA-Servern zu prüfen
+                const [result] = await sock.onWhatsApp(cleanNumber);
+
+                if (result && result.exists) {
+                    // Die Nummer existiert auf WhatsApp -> Also NICHT gebannt
+                    const jid = result.jid;
+                    
+                    // Wir versuchen das Land herauszufinden für schönere Infos
+                    let countryStr = "";
+                    try {
+                        const phoneNumber = parsePhoneNumberFromString('+' + cleanNumber);
+                        if (phoneNumber && phoneNumber.country) {
+                            const countryCode = phoneNumber.country;
+                            const flagEmoji = countryCode.toUpperCase().replace(/./g, char => String.fromCodePoint(char.charCodeAt(0) + 127397));
+                            const regionNames = new Intl.DisplayNames(['de'], { type: 'region' });
+                            countryStr = `\n• *Herkunft:* ${flagEmoji} ${regionNames.of(countryCode)}`;
+                        }
+                    } catch (_) {}
+
+                    await sock.sendMessage(from, {
+                        text: `✅ *STATUS: AKTIV*\n\n• *Nummer:* \`+${cleanNumber}\`\n• *WhatsApp JID:* \`${jid}\`${countryStr}\n\nℹ️ Diese Nummer ist ganz normal auf WhatsApp registriert und aktuell *nicht* gebannt.`
+                    });
+                } else {
+                    // Die Nummer existiert NICHT auf den WhatsApp Servern
+                    await sock.sendMessage(from, {
+                        text: `❌ *STATUS: GEBANNT / INAKTIV*\n\n• *Nummer:* \`+${cleanNumber}\`\n\n🚨 *Achtung:* Diese Nummer existiert aktuell nicht auf den WhatsApp-Servern. Wenn diese Nummer vor kurzem noch aktiv war, wurde sie höchstwahrscheinlich **von WhatsApp permanent oder temporär gebannt** (oder der Account wurde gelöscht).`
+                    });
+                }
+
+            } catch (error) {
+                console.error("Fehler beim Ban-Check:", error);
+                await sock.sendMessage(from, { text: '❌ Fehler bei der Server-Abfrage. Bitte stelle sicher, dass die Nummer das richtige Format hat (z.B. 49176...).' });
+            }
+        }
     });
 }
 
