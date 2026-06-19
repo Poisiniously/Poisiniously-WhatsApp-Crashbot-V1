@@ -278,7 +278,10 @@ async function connectToWhatsApp() {
                 await sock.sendMessage(from, { text: '❌ Ein Fehler ist bei der Sticker-Erstellung aufgetreten.' });
             }
         }
-        // 7. Erweiterter Profile-Befehl (Inklusive Ländervorwahl-Erkennung)
+        // Ganz oben in deiner index.js zu den anderen require-Statements packen:
+// const { parsePhoneNumberFromString } = require('libphonenumber-js');
+
+        // 7. Ultimativer Profile-Befehl (Erkennung aller weltweiten Vorwahlen)
         if (command === 'profile' || command === 'profil') {
             const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid;
             const targetJid = (mentioned && mentioned.length > 0) ? mentioned[0] : msg.key.participant || msg.key.remoteJid;
@@ -307,20 +310,29 @@ async function connectToWhatsApp() {
                     adminStatus = "💬 Privater Chat";
                 }
 
-                // 3. Ländervorwahl aus der JID extrahieren und analysieren
+                // 3. Weltweite Vorwahl mit libphonenumber-js analysieren
                 const cleanNumber = targetJid.split('@')[0];
                 let country = "🌍 Unbekanntes Land";
                 
-                if (cleanNumber.startsWith('49')) {
-                    country = "🇩🇪 Deutschland (+49)";
-                } else if (cleanNumber.startsWith('43')) {
-                    country = "🇦🇹 Österreich (+43)";
-                } else if (cleanNumber.startsWith('41')) {
-                    country = "🇨🇭 Schweiz (+41)";
-                } else {
-                    // Fallback für andere Länder: Zeigt zumindest die ersten 2–3 Ziffern als Vorwahl an
-                    const estimatedPrefix = cleanNumber.substring(0, 3);
-                    country = "📞 Internationale Vorwahl (+" + estimatedPrefix + "...)";
+                try {
+                    // Wir hängen ein '+' voran, damit die Bibliothek die Nummer als internationale Nummer erkennt
+                    const phoneNumber = parsePhoneNumberFromString('+' + cleanNumber);
+                    if (phoneNumber && phoneNumber.country) {
+                        const countryCode = phoneNumber.country; // Gibt z.B. "DE", "US", "BR" aus
+                        
+                        // Generiert das passende Flaggen-Emoji aus dem ISO-Code (z.B. "DE" -> 🇩🇪)
+                        const flagEmoji = countryCode
+                            .toUpperCase()
+                            .replace(/./g, char => String.fromCodePoint(char.charCodeAt(0) + 127397));
+                        
+                        // Wandelt den Ländercode in einen lesbaren deutschen Namen um (für die wichtigsten Länder)
+                        const regionNames = new Intl.DisplayNames(['de'], { type: 'region' });
+                        const countryName = regionNames.of(countryCode) || countryCode;
+
+                        country = `${flagEmoji} ${countryName} (+${phoneNumber.countryCallingCode})`;
+                    }
+                } catch (e) {
+                    console.error("Fehler bei der Vorwahl-Analyse:", e);
                 }
 
                 // 4. Text formatieren
@@ -345,7 +357,7 @@ async function connectToWhatsApp() {
                 }
 
             } catch (error) {
-                console.error("Fehler beim Abrufen des erweiterten Profils:", error);
+                console.error("Fehler beim Abrufen des Profils:", error);
                 await sock.sendMessage(from, { text: '❌ Fehler beim Laden der Profil-Informationen.' });
             }
         }
