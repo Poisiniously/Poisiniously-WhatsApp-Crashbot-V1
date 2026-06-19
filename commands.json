@@ -12,4 +12,4 @@
   "bancheck": {"usage": "bancheck [Nummer mit Ländervorwahl]", "description": "Prüft, ob eine Nummer von WhatsApp gebannt wurde." }
 	"pp": { "usage": "pp @Nutzer", "description": "Extrahiert und sendet das Profilbild eines Nutzers in voller Auflösung." }
 	"viewonce": { "usage": "vo (als Antwort)", "description": "Löscht die Einmalansicht-Sperre von Bildern/Videos und sendet sie normal." }
-  }
+}
